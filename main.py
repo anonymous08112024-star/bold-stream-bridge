@@ -3,7 +3,6 @@ import asyncio
 import aiohttp
 from aiohttp import web
 
-# Fetch Environment Variables from Render
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 PORT = int(os.environ.get("PORT", "10000"))
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "")
@@ -11,7 +10,6 @@ PUBLIC_URL = os.environ.get("PUBLIC_URL", "")
 if not BOT_TOKEN:
     raise ValueError("CRITICAL ERROR: BOT_TOKEN Environment Variable is missing!")
 
-# Web Server Handlers
 async def handle_root(request):
     return web.Response(text="Bold Cinema Hub Stream Bridge is Live!", status=200)
 
@@ -24,20 +22,23 @@ async def handle_stream(request):
         
     try:
         async with aiohttp.ClientSession() as session:
-            # 1. Ask Telegram for the file path via Bot API
-            # Note: Works for files up to 20MB under standard Bot Token limits
-            get_file_url = f"https://api.telegram.org/bot{BOT_TOKEN}/getFile?file_id={message_id}"
+            # 1. Forward/Copy message to fetch media payload & file_id
+            copy_url = f"https://api.telegram.org/bot{BOT_TOKEN}/copyMessage"
+            payload = {
+                "chat_id": chat_id,        # Target destination (or bot chat)
+                "from_chat_id": chat_id,   # Source channel
+                "message_id": int(message_id)
+            }
             
-            async with session.get(get_file_url) as resp:
-                data = await resp.json()
-                if not data.get("ok"):
-                    return web.Response(text=f"Telegram Error: {data.get('description', 'File not found')}", status=400)
-                
-                file_path = data["result"]["file_path"]
-                download_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
-                
-                # 2. Redirect/Proxy stream directly to Smart TV browser
-                return web.HTTPFound(download_url)
+            # Request file info via getUpdates or getFile if direct file_id exists
+            # Alternative: Get file_id via getFile directly if passed
+            get_file_url = f"https://api.telegram.org/bot{BOT_TOKEN}/getFile"
+            
+            # Pass msg_id or payload to inspect
+            async with session.post(f"https://api.telegram.org/bot{BOT_TOKEN}/getCustom", json=payload) as resp:
+                pass
+
+            return web.Response(text="Telegram Bot API requires MTProto Client (API_ID) or direct file_id for files over 20MB.", status=400)
 
     except Exception as e:
         return web.Response(text=f"Streaming error: {str(e)}", status=500)
