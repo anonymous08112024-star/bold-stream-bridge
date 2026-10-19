@@ -1,5 +1,6 @@
 import os
 import asyncio
+import aiohttp
 from aiohttp import web
 
 # Fetch Environment Variables from Render
@@ -18,17 +19,26 @@ async def handle_stream(request):
     message_id = request.match_info.get("msg_id")
     chat_id = request.query.get("chat_id")
     
-    if not chat_id:
-        return web.Response(text="Missing chat_id parameter", status=400)
+    if not chat_id or not message_id:
+        return web.Response(text="Missing chat_id or msg_id parameter", status=400)
         
     try:
-        # Fetch file details directly using pure Telegram Bot API (No API_ID/API_HASH needed)
         async with aiohttp.ClientSession() as session:
-            get_msg_url = f"https://api.telegram.org/bot{BOT_TOKEN}/forwardMessage" # Or use getChat / getMessage via Bot API
-            # For direct file downloading via Bot API:
-            file_info_url = f"https://api.telegram.org/bot{BOT_TOKEN}/getChat?chat_id={chat_id}"
+            # 1. Ask Telegram for the file path via Bot API
+            # Note: Works for files up to 20MB under standard Bot Token limits
+            get_file_url = f"https://api.telegram.org/bot{BOT_TOKEN}/getFile?file_id={message_id}"
             
-        return web.Response(text="Stream bridge active. Use direct file proxy.", status=200)
+            async with session.get(get_file_url) as resp:
+                data = await resp.json()
+                if not data.get("ok"):
+                    return web.Response(text=f"Telegram Error: {data.get('description', 'File not found')}", status=400)
+                
+                file_path = data["result"]["file_path"]
+                download_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
+                
+                # 2. Redirect/Proxy stream directly to Smart TV browser
+                return web.HTTPFound(download_url)
+
     except Exception as e:
         return web.Response(text=f"Streaming error: {str(e)}", status=500)
 
@@ -48,3 +58,4 @@ if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_services())
     loop.run_forever()
+    
