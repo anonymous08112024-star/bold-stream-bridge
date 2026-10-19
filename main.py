@@ -1,17 +1,23 @@
 import os
 import asyncio
-import aiohttp
 from aiohttp import web
+from pyrogram import Client
 
+# Environment Variables
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
+API_ID = int(os.environ.get("API_ID", "0"))
+API_HASH = os.environ.get("API_HASH", "")
 PORT = int(os.environ.get("PORT", "10000"))
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "")
 
-if not BOT_TOKEN:
-    raise ValueError("CRITICAL ERROR: BOT_TOKEN Environment Variable is missing!")
+if not BOT_TOKEN or not API_ID or not API_HASH:
+    raise ValueError("CRITICAL ERROR: BOT_TOKEN, API_ID, or API_HASH environment variable is missing!")
+
+# Initialize Pyrogram Client as Bot
+bot = Client("bold_stream_session", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 async def handle_root(request):
-    return web.Response(text="Bold Cinema Hub Stream Bridge is Live!", status=200)
+    return web.Response(text="Bold Cinema Hub Stream Bridge (MTProto Mode) is Live!", status=200)
 
 async def handle_stream(request):
     message_id = request.match_info.get("msg_id")
@@ -21,29 +27,44 @@ async def handle_stream(request):
         return web.Response(text="Missing chat_id or msg_id parameter", status=400)
         
     try:
-        async with aiohttp.ClientSession() as session:
-            # 1. Forward/Copy message to fetch media payload & file_id
-            copy_url = f"https://api.telegram.org/bot{BOT_TOKEN}/copyMessage"
-            payload = {
-                "chat_id": chat_id,        # Target destination (or bot chat)
-                "from_chat_id": chat_id,   # Source channel
-                "message_id": int(message_id)
-            }
+        msg_id_int = int(message_id)
+        chat_id_int = int(chat_id)
+        
+        # Fetch message metadata directly from Telegram datacenters
+        msg = await bot.get_messages(chat_id_int, msg_id_int)
+        media = msg.video or msg.document or msg.audio
+        
+        if not media:
+            return web.Response(text="No media found in the requested message", status=404)
             
-            # Request file info via getUpdates or getFile if direct file_id exists
-            # Alternative: Get file_id via getFile directly if passed
-            get_file_url = f"https://api.telegram.org/bot{BOT_TOKEN}/getFile"
-            
-            # Pass msg_id or payload to inspect
-            async with session.post(f"https://api.telegram.org/bot{BOT_TOKEN}/getCustom", json=payload) as resp:
-                pass
+        file_size = media.file_size
+        mime_type = getattr(media, 'mime_type', 'video/x-matroska') or 'video/x-matroska'
+        file_name = getattr(media, 'file_name', 'video.mkv') or 'video.mkv'
 
-            return web.Response(text="Telegram Bot API requires MTProto Client (API_ID) or direct file_id for files over 20MB.", status=400)
+        # Build HTTP headers for Smart TV player compatibility
+        headers = {
+            'Content-Type': mime_type,
+            'Content-Length': str(file_size),
+            'Accept-Ranges': 'bytes',
+            'Content-Disposition': f'inline; filename="{file_name}"'
+        }
+        
+        response = web.StreamResponse(status=200, headers=headers)
+        await response.prepare(request)
+        
+        # Stream chunks directly from Telegram datacenters without 20MB restrictions
+        async for chunk in bot.stream_media(msg):
+            await response.write(chunk)
+            
+        return response
 
     except Exception as e:
         return web.Response(text=f"Streaming error: {str(e)}", status=500)
 
 async def start_services():
+    print("Starting Telegram Bot Client...")
+    await bot.start()
+    
     app = web.Application()
     app.router.add_get('/', handle_root)
     app.router.add_get('/stream/{msg_id}', handle_stream)
@@ -59,4 +80,3 @@ if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_services())
     loop.run_forever()
-    
