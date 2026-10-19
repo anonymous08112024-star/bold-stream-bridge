@@ -4,19 +4,24 @@ from aiohttp import web
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
-# Fetch Environment Variables from Zeabur
+# Fetch Environment Variables from Render
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 API_ID = int(os.environ.get("API_ID", "6"))
 API_HASH = os.environ.get("API_HASH", "eb06d4abfb49d3eeb1a5780f2524d262")
-PORT = int(os.environ.get("PORT", 8080))
-PUBLIC_URL = os.environ.get("PUBLIC_URL", "http://localhost:8080")
+
+# Render passes its assigned port automatically via PORT
+PORT = int(os.environ.get("PORT", "10000"))
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "")
+
+if not BOT_TOKEN:
+    raise ValueError("CRITICAL ERROR: BOT_TOKEN Environment Variable is missing!")
 
 # Initialize Pyrogram Bot Client
 bot = Client("bold_stream_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 # Web Server Handlers
 async def handle_root(request):
-    return web.Response(text="Bold Cinema Hub Stream Bridge is Online!", status=200)
+    return web.Response(text="Bold Cinema Hub Stream Bridge is Live on Render!", status=200)
 
 async def handle_stream(request):
     message_id = int(request.match_info.get("msg_id"))
@@ -29,11 +34,11 @@ async def handle_stream(request):
         msg = await bot.get_messages(int(chat_id), message_id)
         media = msg.video or msg.document
         if not media:
-            return web.Response(text="Media not found", status=404)
+            return web.Response(text="Media file not found in chat", status=404)
             
         file_size = media.file_size
         
-        # Prepare streaming response headers
+        # Stream response headers for Smart TV
         response = web.StreamResponse(
             status=200,
             reason='OK',
@@ -46,7 +51,7 @@ async def handle_stream(request):
         )
         await response.prepare(request)
         
-        # Stream file chunks directly from Telegram to user browser
+        # Stream chunks directly from Telegram
         async for chunk in bot.stream_media(msg):
             await response.write(chunk)
             
@@ -59,17 +64,19 @@ async def handle_stream(request):
 async def generate_link(client, message: Message):
     chat_id = message.chat.id
     msg_id = message.id
-    stream_link = f"{PUBLIC_URL.rstrip('/')}/stream/{msg_id}?chat_id={chat_id}"
+    
+    # Use environment URL or fallback
+    domain = PUBLIC_URL.rstrip('/') if PUBLIC_URL else "https://your-service.onrender.com"
+    stream_link = f"{domain}/stream/{msg_id}?chat_id={chat_id}"
     
     reply_text = (
         f"🎬 **Stream Link Generated!**\n\n"
         f"🔗 **URL:** `{stream_link}`\n\n"
-        f"Open this link on your Smart TV browser or paste it into your Mini App catalog."
+        f"Paste this link into your Smart TV browser or Google Sheet catalog."
     )
     await message.reply_text(reply_text)
 
-# Main Application Entry Point
-async def main():
+async def start_services():
     await bot.start()
     app = web.Application()
     app.router.add_get('/', handle_root)
@@ -77,13 +84,13 @@ async def main():
     
     runner = web.AppRunner(app)
     await runner.setup()
+    
+    # Bind to 0.0.0.0 and Render's PORT
     site = web.TCPSite(runner, '0.0.0.0', PORT)
     await site.start()
-    print(f"Server started on port {PORT}")
-    
-    # Keep server running concurrently
-    await asyncio.Event().wait()
+    print(f"=== Web service bound successfully on port {PORT} ===")
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+    loop.run_until_complete(start_services())
+    loop.run_forever()
