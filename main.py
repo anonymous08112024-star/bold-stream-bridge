@@ -28,10 +28,19 @@ async def handle_stream(request):
         
     try:
         msg_id_int = int(message_id)
-        chat_id_int = int(chat_id)
+        raw_chat_id = int(chat_id)
         
-        # Fetch message metadata directly using Pyrogram client
-        msg = await bot.get_messages(chat_id_int, msg_id_int)
+        # Ensure proper supergroup/channel prefix parsing for Pyrogram
+        if raw_chat_id < 0 and not str(raw_chat_id).startswith("-100"):
+            target_chat = int(f"-100{abs(raw_chat_id)}")
+        else:
+            target_chat = raw_chat_id
+
+        # Explicitly fetch chat object to force-load the access hash into session memory
+        chat_obj = await bot.get_chat(target_chat)
+        
+        # Fetch message metadata using the verified chat object ID
+        msg = await bot.get_messages(chat_obj.id, msg_id_int)
         media = msg.video or msg.document or msg.audio
         
         if not media:
@@ -41,7 +50,6 @@ async def handle_stream(request):
         mime_type = getattr(media, 'mime_type', 'video/x-matroska') or 'video/x-matroska'
         file_name = getattr(media, 'file_name', 'video.mkv') or 'video.mkv'
 
-        # Build HTTP headers for Smart TV player compatibility
         headers = {
             'Content-Type': mime_type,
             'Content-Length': str(file_size),
@@ -52,7 +60,6 @@ async def handle_stream(request):
         response = web.StreamResponse(status=200, headers=headers)
         await response.prepare(request)
         
-        # Stream chunks directly from Telegram datacenters
         async for chunk in bot.stream_media(msg):
             await response.write(chunk)
             
@@ -64,15 +71,6 @@ async def handle_stream(request):
 async def start_services():
     print("Starting Telegram Bot Client...")
     await bot.start()
-    
-    # Automatically sync dialogs on startup so all private channels/supergroups are cached in session storage
-    print("Syncing Telegram dialogs to populate peer cache...")
-    try:
-        async for dialog in bot.get_dialogs():
-            pass
-        print("Dialog sync complete. All peers cached successfully.")
-    except Exception as e:
-        print(f"Dialog sync warning: {e}")
     
     app = web.Application()
     app.router.add_get('/', handle_root)
