@@ -8,7 +8,6 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 API_ID = int(os.environ.get("API_ID", "0"))
 API_HASH = os.environ.get("API_HASH", "")
 PORT = int(os.environ.get("PORT", "10000"))
-PUBLIC_URL = os.environ.get("PUBLIC_URL", "")
 
 if not BOT_TOKEN or not API_ID or not API_HASH:
     raise ValueError("CRITICAL ERROR: BOT_TOKEN, API_ID, or API_HASH environment variable is missing!")
@@ -17,30 +16,21 @@ if not BOT_TOKEN or not API_ID or not API_HASH:
 bot = Client("bold_stream_session", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 async def handle_root(request):
-    return web.Response(text="Bold Cinema Hub Stream Bridge (MTProto Mode) is Live!", status=200)
+    return web.Response(text="Bold Cinema Hub Stream Bridge (Public Mode) is Live!", status=200)
 
 async def handle_stream(request):
     message_id = request.match_info.get("msg_id")
-    chat_id = request.query.get("chat_id")
+    # You can now pass either the channel username (e.g. boldpublic) or chat_id
+    chat_username = request.query.get("channel", "boldpublic")
     
-    if not chat_id or not message_id:
-        return web.Response(text="Missing chat_id or msg_id parameter", status=400)
+    if not message_id:
+        return web.Response(text="Missing msg_id parameter", status=400)
         
     try:
         msg_id_int = int(message_id)
-        raw_chat_id = int(chat_id)
         
-        # Ensure proper supergroup/channel prefix parsing for Pyrogram
-        if raw_chat_id < 0 and not str(raw_chat_id).startswith("-100"):
-            target_chat = int(f"-100{abs(raw_chat_id)}")
-        else:
-            target_chat = raw_chat_id
-
-        # Explicitly fetch chat object to force-load the access hash into session memory
-        chat_obj = await bot.get_chat(target_chat)
-        
-        # Fetch message metadata using the verified chat object ID
-        msg = await bot.get_messages(chat_obj.id, msg_id_int)
+        # Fetch message directly using the public channel handle
+        msg = await bot.get_messages(chat_username, msg_id_int)
         media = msg.video or msg.document or msg.audio
         
         if not media:
