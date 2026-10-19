@@ -30,19 +30,7 @@ async def handle_stream(request):
         msg_id_int = int(message_id)
         chat_id_int = int(chat_id)
         
-        # Force Pyrogram to register and cache the peer properly
-        try:
-            peer = await bot.resolve_peer(chat_id_int)
-        except Exception:
-            # Fallback normalization for supergroup/channel IDs if raw resolve fails
-            if chat_id_int < 0 and not str(chat_id_int).startswith("-100"):
-                channel_id = int(f"-100{abs(chat_id_int)}")
-            else:
-                channel_id = chat_id_int
-            peer = await bot.resolve_peer(channel_id)
-            chat_id_int = channel_id
-
-        # Fetch message metadata directly using the resolved peer
+        # Fetch message metadata directly using Pyrogram client
         msg = await bot.get_messages(chat_id_int, msg_id_int)
         media = msg.video or msg.document or msg.audio
         
@@ -77,11 +65,20 @@ async def start_services():
     print("Starting Telegram Bot Client...")
     await bot.start()
     
+    # Automatically sync dialogs on startup so all private channels/supergroups are cached in session storage
+    print("Syncing Telegram dialogs to populate peer cache...")
+    try:
+        async for dialog in bot.get_dialogs():
+            pass
+        print("Dialog sync complete. All peers cached successfully.")
+    except Exception as e:
+        print(f"Dialog sync warning: {e}")
+    
     app = web.Application()
     app.router.add_get('/', handle_root)
     app.router.add_get('/stream/{msg_id}', handle_stream)
     
-    runner = AppRunner = web.AppRunner(app)
+    runner = web.AppRunner(app)
     await runner.setup()
     
     site = web.TCPSite(runner, '0.0.0.0', PORT)
