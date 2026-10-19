@@ -30,8 +30,11 @@ async def handle_stream(request):
         msg_id_int = int(message_id)
         chat_id_int = int(chat_id)
         
+        # Explicitly resolve the peer/chat so Pyrogram caches it and avoids Peer id invalid errors
+        chat = await bot.get_chat(chat_id_int)
+        
         # Fetch message metadata directly from Telegram datacenters
-        msg = await bot.get_messages(chat_id_int, msg_id_int)
+        msg = await bot.get_messages(chat.id, msg_id_int)
         media = msg.video or msg.document or msg.audio
         
         if not media:
@@ -52,7 +55,7 @@ async def handle_stream(request):
         response = web.StreamResponse(status=200, headers=headers)
         await response.prepare(request)
         
-        # Stream chunks directly from Telegram datacenters without 20MB restrictions
+        # Stream chunks directly from Telegram datacenters
         async for chunk in bot.stream_media(msg):
             await response.write(chunk)
             
